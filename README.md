@@ -88,8 +88,10 @@ For more information, see [apps/server/README.md](apps/server/README.md)
 
 ## 📝 License
 
-[Add your license information here]
+All Rights Reserved © 2026 Andrei-Alexandru Otea
+
+This is an academic thesis project. Unauthorized copying, reproduction, or distribution of this work is prohibited.
 
 ## 👤 Author
 
-[Add author information here]
+Andrei-Alexandru Otea

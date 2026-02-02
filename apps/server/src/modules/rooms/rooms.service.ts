@@ -15,7 +15,7 @@ export class RoomsService {
     const room: Room = {
       id: randomUUID(),
       createdAt: Date.now(),
-      title: title?.trim() || undefined,
+      title: title?.trim() ? title.trim() : undefined,
     };
 
     this.rooms.set(room.id, room);
