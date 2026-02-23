@@ -1,2 +1,6 @@
 packages:
-  - "apps/*"
+  - apps/*
+
+ignoredBuiltDependencies:
+  - '@nestjs/core'
+  - unrs-resolver

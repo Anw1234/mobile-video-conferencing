@@ -7,6 +7,6 @@ export class HealthService {
   }
 
   version() {
-    return { name: 'mobile-video-conferencing', apiVersion: 'v1' };
+    return { name: 'mobile-video-conferencing' };
   }
 }
