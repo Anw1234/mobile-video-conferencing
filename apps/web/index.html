@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebRTC Test</title>
+  </head>
+  <body>
+    <div id="app">
+      <h2>WebRTC Signaling Test</h2>
+
+      <div class="row">
+        <label>Room ID</label>
+        <input id="roomId" placeholder="(create or paste room id)" />
+        <button id="createRoom">Create room</button>
+      </div>
+
+      <div class="row">
+        <label>Display name</label>
+        <input id="displayName" value="Alex" />
+        <button id="joinRoom">Join room</button>
+      </div>
+
+      <div class="row">
+        <button id="startWs" disabled>Connect WS (rtc:join)</button>
+      </div>
+
+      <div class="row small" id="status"></div>
+
+      <div class="videos">
+        <div>
+          <h3>Local</h3>
+          <video id="localVideo" autoplay playsinline muted></video>
+        </div>
+        <div>
+          <h3>Remote</h3>
+          <video id="remoteVideo" autoplay playsinline></video>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
