@@ -17,15 +17,23 @@
 
       <div class="row">
         <label>Display name</label>
-        <input id="displayName" value="Alex" />
+        <input id="displayName" value="Andrei" />
         <button id="joinRoom">Join room</button>
       </div>
 
       <div class="row">
         <button id="startWs" disabled>Connect WS (rtc:join)</button>
+        <button id="leaveRoom" disabled>Leave</button>
+        <button id="toggleAudio" disabled>Mute audio</button>
+        <button id="toggleVideo" disabled>Stop video</button>
       </div>
 
       <div class="row small" id="status"></div>
+
+      <div class="participants-box">
+        <h3>Participants</h3>
+        <ul id="participantsList"></ul>
+      </div>
 
       <div class="videos">
         <div>

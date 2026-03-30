@@ -1,5 +1,5 @@
 import { io } from "socket.io-client";
-import "../style.css";
+import "./style.css";
 
 const API_BASE = "http://localhost:3000";
 const WS_URL = "http://localhost:3000/ws";
@@ -11,31 +11,144 @@ const displayNameInput = el("displayName");
 const btnCreateRoom = el("createRoom");
 const btnJoinRoom = el("joinRoom");
 const btnStartWs = el("startWs");
+const btnLeaveRoom = el("leaveRoom");
+const btnToggleAudio = el("toggleAudio");
+const btnToggleVideo = el("toggleVideo");
 const statusEl = el("status");
-
 const localVideo = el("localVideo");
 const remoteVideo = el("remoteVideo");
+const participantsList = el("participantsList");
 
 let socket = null;
 let roomId = null;
 let participantId = null;
-
 let localStream = null;
 let pc = null;
 let remoteParticipantId = null;
+let isAudioEnabled = true;
+let isVideoEnabled = true;
+let participants = [];
 
 function setStatus(msg) {
   statusEl.textContent = msg;
   console.log(msg);
 }
 
+updateMediaButtons();
+setMediaButtonsEnabled(false);
+renderParticipants();
+
+function updateMediaButtons() {
+  btnToggleAudio.textContent = isAudioEnabled ? "Mute audio" : "Unmute audio";
+  btnToggleVideo.textContent = isVideoEnabled ? "Stop video" : "Start video";
+}
+
+function setMediaButtonsEnabled(enabled) {
+  btnToggleAudio.disabled = !enabled;
+  btnToggleVideo.disabled = !enabled;
+}
+
+function toggleAudio() {
+  if (!localStream) return;
+
+  const audioTracks = localStream.getAudioTracks();
+  if (!audioTracks.length) return;
+
+  isAudioEnabled = !isAudioEnabled;
+  for (const track of audioTracks) {
+    track.enabled = isAudioEnabled;
+  }
+
+  updateMediaButtons();
+  // setStatus(isAudioEnabled ? "Audio unmuted" : "Audio muted");
+}
+
+function toggleVideo() {
+  if (!localStream) return;
+
+  const videoTracks = localStream.getVideoTracks();
+  if (!videoTracks.length) return;
+
+  isVideoEnabled = !isVideoEnabled;
+  for (const track of videoTracks) {
+    track.enabled = isVideoEnabled;
+  }
+
+  updateMediaButtons();
+  setStatus(isVideoEnabled ? "Video started" : "Video stopped");
+}
+
+function resetPeerConnection() {
+  if (pc) {
+    try {
+      pc.onicecandidate = null;
+      pc.ontrack = null;
+      pc.close();
+    } catch (e) {
+      console.error("pc.close failed", e);
+    }
+    pc = null;
+  }
+
+  remoteParticipantId = null;
+  remoteVideo.srcObject = null;
+}
+
+function stopLocalMedia() {
+  if (localStream) {
+    for (const track of localStream.getTracks()) {
+      try {
+        track.stop();
+      } catch (e) {
+        console.error("track.stop failed", e);
+      }
+    }
+  }
+
+  localStream = null;
+  localVideo.srcObject = null;
+
+  isAudioEnabled = true;
+  isVideoEnabled = true;
+  updateMediaButtons();
+  setMediaButtonsEnabled(false);
+}
+
+function disconnectSocket() {
+  if (!socket) return;
+  try {
+    socket.disconnect();
+  } catch (e) {
+    console.error("socket.disconnect failed", e);
+  }
+  socket = null;
+}
+
+function resetSessionState() {
+  participantId = null;
+  roomId = roomIdInput.value.trim() || null;
+  btnStartWs.disabled = true;
+  btnLeaveRoom.disabled = true;
+  setMediaButtonsEnabled(false);
+
+  participants = [];
+  renderParticipants();
+}
+
 async function ensureLocalMedia() {
   if (localStream) return localStream;
+
   localStream = await navigator.mediaDevices.getUserMedia({
     video: true,
     audio: true,
   });
+
   localVideo.srcObject = localStream;
+  isAudioEnabled = true;
+  isVideoEnabled = true;
+  updateMediaButtons();
+  setMediaButtonsEnabled(true);
+
   return localStream;
 }
 
@@ -47,7 +160,8 @@ function createPeerConnection(toParticipantId) {
   });
 
   pc.onicecandidate = (event) => {
-    if (!event.candidate) return;
+    if (!event.candidate || !socket) return;
+
     socket.emit("rtc:ice", {
       roomId,
       from: participantId,
@@ -65,6 +179,45 @@ function createPeerConnection(toParticipantId) {
   }
 
   return pc;
+}
+
+function renderParticipants() {
+  if (!participantsList) return;
+
+  participantsList.innerHTML = "";
+
+  if (!participants.length) {
+    const li = document.createElement("li");
+    li.textContent = "No participants";
+    participantsList.appendChild(li);
+    return;
+  }
+
+  for (const p of participants) {
+    const li = document.createElement("li");
+    const isMe = p.id === participantId;
+    li.textContent = isMe ? `${p.displayName} (you)` : `${p.displayName}`;
+    participantsList.appendChild(li);
+  }
+}
+
+async function fetchParticipants() {
+  if (!roomId) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/rooms/${roomId}/participants`);
+    const data = await res.json();
+
+    if (!res.ok) {
+      console.error("Failed to fetch participants", data);
+      return;
+    }
+
+    participants = Array.isArray(data) ? data : [];
+    renderParticipants();
+  } catch (e) {
+    console.error("fetchParticipants failed", e);
+  }
 }
 
 async function makeOffer(toParticipantId) {
@@ -85,6 +238,7 @@ async function makeOffer(toParticipantId) {
 
 async function handleOffer(msg) {
   const { from, data } = msg;
+
   if (!pc) createPeerConnection(from);
 
   await pc.setRemoteDescription(data);
@@ -103,8 +257,9 @@ async function handleOffer(msg) {
 }
 
 async function handleAnswer(msg) {
-  const { data, from } = msg;
+  const { from, data } = msg;
   if (!pc) return;
+
   await pc.setRemoteDescription(data);
   setStatus(`Got answer from ${from}`);
 }
@@ -112,6 +267,7 @@ async function handleAnswer(msg) {
 async function handleIce(msg) {
   const { data } = msg;
   if (!pc) return;
+
   try {
     await pc.addIceCandidate(data);
   } catch (e) {
@@ -119,65 +275,142 @@ async function handleIce(msg) {
   }
 }
 
+async function leaveRoom() {
+  const currentRoomId = roomId;
+  const currentParticipantId = participantId;
+
+  resetPeerConnection();
+  stopLocalMedia();
+  disconnectSocket();
+
+  if (currentRoomId && currentParticipantId) {
+    try {
+      await fetch(`${API_BASE}/rooms/${currentRoomId}/leave`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ participantId: currentParticipantId }),
+      });
+    } catch (e) {
+      console.error("leave request failed", e);
+    }
+  }
+
+  resetSessionState();
+  setStatus("Left room");
+}
+
 btnCreateRoom.onclick = async () => {
-  setStatus("Creating room...");
-  const res = await fetch(`${API_BASE}/rooms`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title: "WebRTC room" }),
-  });
-  const room = await res.json();
-  roomIdInput.value = room.id;
-  setStatus(`Created room: ${room.id}`);
+  try {
+    setStatus("Creating room...");
+
+    const res = await fetch(`${API_BASE}/rooms`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "WebRTC room" }),
+    });
+
+    const room = await res.json();
+    roomIdInput.value = room.id;
+    roomId = room.id;
+
+    setStatus(`Created room: ${room.id}`);
+  } catch (e) {
+    console.error(e);
+    setStatus("Create room failed");
+  }
 };
 
 btnJoinRoom.onclick = async () => {
-  roomId = roomIdInput.value.trim();
-  const displayName = displayNameInput.value.trim();
+  try {
+    roomId = roomIdInput.value.trim();
+    const displayName = displayNameInput.value.trim();
 
-  if (!roomId) return setStatus("Room ID missing");
-  if (!displayName) return setStatus("Display name missing");
+    if (!roomId) return setStatus("Room ID missing");
+    if (!displayName) return setStatus("Display name missing");
 
-  setStatus("Joining room...");
-  const res = await fetch(`${API_BASE}/rooms/${roomId}/join`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ displayName }),
-  });
+    setStatus("Joining room...");
 
-  const joinRes = await res.json();
-  participantId = joinRes.participantId;
+    const res = await fetch(`${API_BASE}/rooms/${roomId}/join`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ displayName }),
+    });
 
-  setStatus(`Joined. participantId=${participantId}`);
-  btnStartWs.disabled = false;
+    const joinRes = await res.json();
+
+    if (!res.ok) {
+      console.error("Join failed response", joinRes);
+      return setStatus(joinRes.message || "Join failed");
+    }
+
+    if (!joinRes?.participantId) {
+      console.error("Invalid join response", joinRes);
+      return setStatus("Join failed");
+    }
+
+    participantId = joinRes.participantId;
+    await fetchParticipants();
+
+    setStatus(`Joined. participantId=${participantId}`);
+    btnStartWs.disabled = false;
+    btnLeaveRoom.disabled = false;
+  } catch (e) {
+    console.error(e);
+    setStatus("Join room failed");
+  }
 };
 
 btnStartWs.onclick = async () => {
-  if (!roomId || !participantId) return setStatus("Join first");
+  try {
+    if (!roomId || !participantId) return setStatus("Join first");
 
-  await ensureLocalMedia();
+    await ensureLocalMedia();
 
-  socket = io(WS_URL, { transports: ["websocket"] });
+    socket = io(WS_URL, { transports: ["websocket"] });
 
-  socket.on("connect", () => {
-    setStatus(`WS connected (${socket.id}). rtc:join...`);
-    socket.emit("rtc:join", { roomId, participantId });
-  });
+    socket.on("connect", () => {
+      setStatus(`WS connected (${socket.id}). rtc:join...`);
+      socket.emit("rtc:join", { roomId, participantId });
+    });
 
-  socket.on("rtc:peerJoined", async (m) => {
-    setStatus(`Peer joined: ${m.participantId}`);
-    await makeOffer(m.participantId);
-  });
+    socket.on("rtc:peerJoined", async (m) => {
+      setStatus(`Peer joined: ${m.participantId}`);
+      await makeOffer(m.participantId);
+    });
 
-  socket.on("rtc:offer", handleOffer);
-  socket.on("rtc:answer", handleAnswer);
-  socket.on("rtc:ice", handleIce);
+    socket.on("rtc:offer", handleOffer);
+    socket.on("rtc:answer", handleAnswer);
+    socket.on("rtc:ice", handleIce);
 
-  socket.on("rtc:peerLeft", (m) => {
-    setStatus(`Peer left: ${m.participantId}`);
-    remoteVideo.srcObject = null;
-    if (pc) pc.close();
-    pc = null;
-    remoteParticipantId = null;
-  });
+    socket.on("rtc:peerLeft", (m) => {
+      setStatus(`Peer left: ${m.participantId}`);
+      resetPeerConnection();
+    });
+
+    btnStartWs.disabled = true;
+    btnLeaveRoom.disabled = false;
+
+    socket.on("rooms:participants", (payload) => {
+      if (payload?.roomId !== roomId) return;
+      participants = Array.isArray(payload.participants)
+        ? payload.participants
+        : [];
+      renderParticipants();
+    });
+  } catch (e) {
+    console.error(e);
+    setStatus("WS connect failed");
+  }
+};
+
+btnLeaveRoom.onclick = async () => {
+  await leaveRoom();
+};
+
+btnToggleAudio.onclick = () => {
+  toggleAudio();
+};
+
+btnToggleVideo.onclick = () => {
+  toggleVideo();
 };
