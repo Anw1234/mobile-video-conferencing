@@ -34,13 +34,10 @@ $ pnpm install
 ## Compile and run the project
 
 ```bash
-# development
-$ pnpm run start
+# development (watch mode on port 3000)
+$ pnpm start:dev
 
-# watch mode
-$ pnpm run start:dev
-
-# production mode
+# production
 $ pnpm run start:prod
 ```
 

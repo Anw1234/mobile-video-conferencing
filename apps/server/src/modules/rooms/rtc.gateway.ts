@@ -137,4 +137,28 @@ export class RtcGateway {
       participantId,
     });
   }
+
+    @SubscribeMessage("rtc:mediaState")
+  onMediaState(
+    @MessageBody() msg: {
+      roomId: string;
+      from: string;
+      to?: string;
+      audioEnabled: boolean;
+      videoEnabled: boolean;
+    },
+    @ConnectedSocket() socket: Socket,
+  ) {
+    if (!msg?.roomId || !msg?.from) return;
+
+    if (msg.to) {
+      const targetSocketId = this.getSocketId(msg.roomId, msg.to);
+      if (targetSocketId) {
+        this.server.to(targetSocketId).emit("rtc:mediaState", msg);
+      }
+      return;
+    }
+
+    socket.to(msg.roomId).emit("rtc:mediaState", msg);
+  }
 }

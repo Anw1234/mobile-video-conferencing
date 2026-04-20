@@ -29,23 +29,32 @@ pnpm install
 
 ### Quick Start
 
-Start the development server immediately:
+Start all development servers:
 
+**Backend Server** (NestJS on port 3000):
 ```bash
-pnpm --filter server start:dev
+cd apps/server
+pnpm start:dev
 ```
 
-The server will be available at `http://localhost:3000`
+**Web Application** (port 5173):
+```bash
+cd apps/web
+pnpm dev
+```
+
+**Mobile Application** (Metro bundler with dev client):
+```bash
+cd apps/mobile
+npx expo start --dev-client
+```
 
 ### Development
 
-Start the development server:
-
-```bash
-pnpm --filter server start:dev
-```
-
-The server will run on `http://localhost:3000` by default.
+Each application runs independently:
+- **Backend**: `http://localhost:3000`
+- **Web**: `http://localhost:5173`
+- **Mobile**: Start with `npx expo start --dev-client` and select your device/emulator
 
 ### Build
 

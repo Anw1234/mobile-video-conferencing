@@ -14,6 +14,7 @@ import {
   RTCPeerConnection,
   RTCView,
 } from "react-native-webrtc";
+import { Ionicons } from "@expo/vector-icons";
 
 const API_BASE = "http://192.168.1.245:3000";
 const WS_URL = "http://192.168.1.245:3000/ws";
@@ -44,16 +45,27 @@ type RtcSignalPayload = {
 
 export default function HomeScreen() {
   const [roomId, setRoomId] = useState("");
-  const [displayName, setDisplayName] = useState("Alex Mobile");
+  const [displayName, setDisplayName] = useState("Andrei Mobile");
   const [status, setStatus] = useState("Idle");
   const [participantId, setParticipantId] = useState<string | null>(null);
 
   const [localStream, setLocalStream] = useState<any>(null);
   const [remoteStream, setRemoteStream] = useState<any>(null);
 
+  const [isAudioEnabled, setIsAudioEnabled] = useState(true);
+  const [isVideoEnabled, setIsVideoEnabled] = useState(true);
+
+  const [remoteAudioEnabled, setRemoteAudioEnabled] = useState(true);
+  const [remoteVideoEnabled, setRemoteVideoEnabled] = useState(true);
+
   const socketRef = useRef<any>(null);
   const pcRef = useRef<any>(null);
   const remoteParticipantIdRef = useRef<string | null>(null);
+  const [isWsConnected, setIsWsConnected] = useState(false);
+
+  const [participants, setParticipants] = useState<
+  { id: string; displayName: string; roomId: string; joinedAt: number }[]
+>([]);
 
   const setStatusSafe = (msg: string) => {
     console.log(msg);
@@ -114,11 +126,30 @@ export default function HomeScreen() {
 
       setParticipantId(data.participantId);
       setStatusSafe(`Joined room: ${data.participantId}`);
+      await fetchParticipants();
     } catch (error) {
       console.error(error);
       setStatusSafe("Join room failed");
     }
   };
+
+  const fetchParticipants = async () => {
+  try {
+    if (!roomId) return;
+
+    const res = await fetch(`${API_BASE}/rooms/${roomId}/participants`);
+    const data = await res.json();
+
+    if (!res.ok) {
+      console.error("Failed to fetch participants", data);
+      return;
+    }
+
+    setParticipants(Array.isArray(data) ? data : []);
+  } catch (error) {
+    console.error("fetchParticipants failed", error);
+  }
+};
 
   const ensureLocalMedia = async (): Promise<any> => {
     if (localStream) return localStream;
@@ -218,6 +249,7 @@ export default function HomeScreen() {
 
       socket.on("connect", () => {
         setStatusSafe(`WS connected: ${socket.id}`);
+        setIsWsConnected(true);
 
         const payload: RtcJoinPayload = {
           roomId,
@@ -230,6 +262,7 @@ export default function HomeScreen() {
       socket.on("rtc:peerJoined", async (m: { participantId: string }) => {
         setStatusSafe(`Peer joined: ${m.participantId}`);
         await makeOffer(m.participantId);
+        emitMediaState(isAudioEnabled, isVideoEnabled);
       });
 
       socket.on("rtc:offer", async (msg: RtcSignalPayload) => {
@@ -297,7 +330,21 @@ export default function HomeScreen() {
           pcRef.current.close();
           pcRef.current = null;
         }
+
+        fetchParticipants();
       });
+
+      socket.on("rtc:mediaState", (msg: any) => {
+        if (!msg) return;
+        setRemoteAudioEnabled(msg.audioEnabled);
+        setRemoteVideoEnabled(msg.videoEnabled);
+      });
+
+      socket.on("rooms:participants", (payload: any) => {
+        if (!payload?.roomId || payload.roomId !== roomId) return;
+        setParticipants(Array.isArray(payload.participants) ? payload.participants : []);
+      });
+
     } catch (error) {
       console.error(error);
       setStatusSafe("WS connect failed");
@@ -337,11 +384,59 @@ export default function HomeScreen() {
 
       setParticipantId(null);
       setStatusSafe("Left room");
+
+      setRemoteAudioEnabled(true);
+      setRemoteVideoEnabled(true);
+      setIsAudioEnabled(true);
+      setIsVideoEnabled(true);
+      setParticipants([]);
+      setIsWsConnected(false);
     } catch (error) {
       console.error(error);
       setStatusSafe("Leave failed");
     }
   };
+
+  function toggleAudio() {
+  if (!localStream) return;
+
+  const nextAudioEnabled = !isAudioEnabled;
+
+  localStream.getAudioTracks().forEach((track: any) => {
+    track.enabled = nextAudioEnabled;
+  });
+
+  setIsAudioEnabled(nextAudioEnabled);
+  emitMediaState(nextAudioEnabled, isVideoEnabled);
+}
+
+  function toggleVideo() {
+  if (!localStream) return;
+
+  const nextVideoEnabled = !isVideoEnabled;
+
+  localStream.getVideoTracks().forEach((track: any) => {
+    track.enabled = nextVideoEnabled;
+  });
+
+  setIsVideoEnabled(nextVideoEnabled);
+  emitMediaState(isAudioEnabled, nextVideoEnabled);
+}
+
+  function emitMediaState(
+    nextAudioEnabled: boolean,
+    nextVideoEnabled: boolean
+  ) {
+    if (!socketRef.current || !participantId) return;
+
+    socketRef.current.emit("rtc:mediaState", {
+      roomId,
+      from: participantId,
+      to: remoteParticipantIdRef.current ?? undefined,
+      audioEnabled: nextAudioEnabled,
+      videoEnabled: nextVideoEnabled,
+    });
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -372,7 +467,77 @@ export default function HomeScreen() {
           <Button title="Leave" onPress={leaveRoom} />
         </View>
 
+        <View style={styles.row}>
+          <Button
+            title={isAudioEnabled ? "Mute audio" : "Unmute audio"}
+            onPress={toggleAudio}
+          />
+          <Button
+            title={isVideoEnabled ? "Stop video" : "Start video"}
+            onPress={toggleVideo}
+          />
+        </View>
+
+        <View style={styles.indicatorRow}>
+          <View style={styles.indicator}>
+            <Ionicons
+              name={isAudioEnabled ? "mic" : "mic-off"}
+              size={18}
+              color={isAudioEnabled ? "green" : "red"}
+            />
+            <Text style={styles.indicatorText}>
+              {isAudioEnabled ? "Mic on" : "Muted"}
+            </Text>
+          </View>
+
+          <View style={styles.indicator}>
+            <Ionicons
+              name={isVideoEnabled ? "videocam" : "videocam-off"}
+              size={18}
+              color={isVideoEnabled ? "green" : "red"}
+            />
+            <Text style={styles.indicatorText}>
+              {isVideoEnabled ? "Video on" : "Video stopped"}
+            </Text>
+          </View>
+        </View>
+
         <Text style={styles.status}>{status}</Text>
+          {participantId && (
+            <View style={styles.participantsBox}>
+              <Text style={styles.participantsTitle}>Participants</Text>
+
+              {!isWsConnected ? (
+                participants.some((p) => p.id !== participantId) ? (
+                  <Text style={styles.participantItem}>Someone is here</Text>
+                ) : (
+                  <Text style={styles.participantItem}>Waiting for others...</Text>
+                )
+              ) : (
+                <>
+                  {participants
+                    .filter((p) => p.id === participantId)
+                    .map((p) => (
+                      <Text key={p.id} style={styles.participantItem}>
+                        {p.displayName} (you)
+                      </Text>
+                    ))}
+
+                  {participants
+                    .filter((p) => p.id !== participantId)
+                    .map((p) => (
+                      <Text key={p.id} style={styles.participantItem}>
+                        {p.displayName}
+                      </Text>
+                    ))}
+
+                  {participants.length === 1 && (
+                    <Text style={styles.participantItem}>Waiting for others...</Text>
+                  )}
+                </>
+              )}
+            </View>
+          )}
 
         <Text style={styles.label}>Local</Text>
         {localStream ? (
@@ -387,15 +552,32 @@ export default function HomeScreen() {
         )}
 
         <Text style={styles.label}>Remote</Text>
-        {remoteStream ? (
-          <RTCView
-            streamURL={remoteStream.toURL()}
-            style={styles.video}
-            objectFit="cover"
-          />
-        ) : (
-          <View style={styles.placeholder} />
-        )}
+        <View style={styles.remoteWrapper}>
+          {remoteStream ? (
+            <RTCView
+              streamURL={remoteStream.toURL()}
+              style={styles.video}
+              objectFit="cover"
+            />
+          ) : (
+            <View style={styles.placeholder} />
+          )}
+
+          {!remoteAudioEnabled && (
+            <View style={styles.overlayBadge}>
+              <Ionicons name="mic-off" size={16} color="#fff" />
+              <Text style={styles.overlayBadgeText}>Muted</Text>
+            </View>
+          )}
+
+          {!remoteVideoEnabled && (
+            <View style={styles.overlayBadgeBottom}>
+              <Ionicons name="videocam-off" size={16} color="#fff" />
+              <Text style={styles.overlayBadgeText}>Video off</Text>
+            </View>
+          )}
+        </View>
+
       </ScrollView>
     </SafeAreaView>
   );
@@ -440,4 +622,81 @@ const styles = StyleSheet.create({
     backgroundColor: "#ddd",
     borderRadius: 12,
   },
+indicatorRow: {
+  flexDirection: "row",
+  gap: 12,
+  marginBottom: 12,
+},
+
+indicator: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 6,
+  backgroundColor: "#f3f3f3",
+  paddingHorizontal: 10,
+  paddingVertical: 6,
+  borderRadius: 999,
+},
+
+indicatorText: {
+  fontSize: 14,
+  fontWeight: "500",
+},
+
+remoteWrapper: {
+  position: "relative",
+},
+
+overlayBadge: {
+  position: "absolute",
+  top: 10,
+  left: 10,
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 6,
+  backgroundColor: "rgba(0,0,0,0.7)",
+  paddingHorizontal: 10,
+  paddingVertical: 6,
+  borderRadius: 999,
+},
+
+overlayBadgeBottom: {
+  position: "absolute",
+  bottom: 10,
+  left: 10,
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 6,
+  backgroundColor: "rgba(0,0,0,0.7)",
+  paddingHorizontal: 10,
+  paddingVertical: 6,
+  borderRadius: 999,
+},
+
+overlayBadgeText: {
+  color: "#fff",
+  fontSize: 13,
+  fontWeight: "600",
+},
+
+participantsBox: {
+  marginTop: 8,
+  marginBottom: 8,
+  padding: 12,
+  borderWidth: 1,
+  borderColor: "#ddd",
+  borderRadius: 12,
+  backgroundColor: "#fafafa",
+},
+
+participantsTitle: {
+  fontSize: 16,
+  fontWeight: "700",
+  marginBottom: 8,
+},
+
+participantItem: {
+  fontSize: 14,
+  marginBottom: 6,
+},
 });

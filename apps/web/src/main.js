@@ -28,10 +28,24 @@ let remoteParticipantId = null;
 let isAudioEnabled = true;
 let isVideoEnabled = true;
 let participants = [];
+let remoteAudioEnabled = true;
+let remoteVideoEnabled = true;
 
 function setStatus(msg) {
   statusEl.textContent = msg;
   console.log(msg);
+}
+
+function emitMediaState(nextAudioEnabled, nextVideoEnabled) {
+  if (!socket || !participantId) return;
+
+  socket.emit("rtc:mediaState", {
+    roomId,
+    from: participantId,
+    to: remoteParticipantId ?? undefined,
+    audioEnabled: nextAudioEnabled,
+    videoEnabled: nextVideoEnabled,
+  });
 }
 
 updateMediaButtons();
@@ -60,7 +74,8 @@ function toggleAudio() {
   }
 
   updateMediaButtons();
-  // setStatus(isAudioEnabled ? "Audio unmuted" : "Audio muted");
+  emitMediaState(isAudioEnabled, isVideoEnabled);
+  setStatus(isAudioEnabled ? "Audio unmuted" : "Audio muted");
 }
 
 function toggleVideo() {
@@ -75,6 +90,7 @@ function toggleVideo() {
   }
 
   updateMediaButtons();
+  emitMediaState(isAudioEnabled, isVideoEnabled);
   setStatus(isVideoEnabled ? "Video started" : "Video stopped");
 }
 
@@ -92,6 +108,10 @@ function resetPeerConnection() {
 
   remoteParticipantId = null;
   remoteVideo.srcObject = null;
+
+  remoteAudioEnabled = true;
+  remoteVideoEnabled = true;
+  renderRemoteMediaBadges();
 }
 
 function stopLocalMedia() {
@@ -201,6 +221,39 @@ function renderParticipants() {
   }
 }
 
+function renderRemoteMediaBadges() {
+  const remoteWrapper = document.getElementById("remoteWrapper");
+  if (!remoteWrapper) return;
+
+  let topBadge = document.getElementById("remoteAudioBadge");
+  let bottomBadge = document.getElementById("remoteVideoBadge");
+
+  if (!topBadge) {
+    topBadge = document.createElement("div");
+    topBadge.id = "remoteAudioBadge";
+    topBadge.className = "overlay-badge";
+    remoteWrapper.appendChild(topBadge);
+  }
+
+  if (!bottomBadge) {
+    bottomBadge = document.createElement("div");
+    bottomBadge.id = "remoteVideoBadge";
+    bottomBadge.className = "overlay-badge overlay-badge-bottom";
+    remoteWrapper.appendChild(bottomBadge);
+  }
+
+  topBadge.innerHTML = !remoteAudioEnabled
+    ? `🎤 Off`
+    : "";
+
+  bottomBadge.innerHTML = !remoteVideoEnabled
+    ? `📷 Off`
+    : "";
+
+  topBadge.style.display = !remoteAudioEnabled ? "flex" : "none";
+  bottomBadge.style.display = !remoteVideoEnabled ? "flex" : "none";
+}
+
 async function fetchParticipants() {
   if (!roomId) return;
 
@@ -254,6 +307,7 @@ async function handleOffer(msg) {
   });
 
   setStatus(`Got offer from ${from}, sent answer`);
+  emitMediaState(isAudioEnabled, isVideoEnabled);
 }
 
 async function handleAnswer(msg) {
@@ -396,6 +450,13 @@ btnStartWs.onclick = async () => {
         ? payload.participants
         : [];
       renderParticipants();
+    });
+    socket.on("rtc:mediaState", (msg) => {
+      if (!msg) return;
+
+      remoteAudioEnabled = msg.audioEnabled;
+      remoteVideoEnabled = msg.videoEnabled;
+      renderRemoteMediaBadges();
     });
   } catch (e) {
     console.error(e);
